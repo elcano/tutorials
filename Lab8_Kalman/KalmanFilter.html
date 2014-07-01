@@ -1,0 +1,71 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.0 Transitional//EN">
+<HTML>
+<HEAD>
+	<META HTTP-EQUIV="CONTENT-TYPE" CONTENT="text/html; charset=utf-8">
+	<TITLE></TITLE>
+	<META NAME="GENERATOR" CONTENT="LibreOffice 3.4  (Unix)">
+	<META NAME="AUTHOR" CONTENT="Tyler Folsom">
+	<META NAME="CREATED" CONTENT="20140311;12275400">
+	<META NAME="CHANGEDBY" CONTENT="Tyler Folsom">
+	<META NAME="CHANGED" CONTENT="20140311;12413500">
+	<STYLE TYPE="text/css">
+	<!--
+		@page { margin: 0.79in }
+		P { margin-bottom: 0.08in }
+		A:link { so-language: zxx }
+	-->
+	</STYLE>
+</HEAD>
+<BODY LANG="en-US" DIR="LTR">
+<P STYLE="margin-bottom: 0in"><FONT FACE="Arial, sans-serif"><B>8.
+Kalman filter</B></FONT></P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in">Elcano uses an Arduino Mega
+microcontroller to obtain a realtime fix on the current location. 
+The implemented code uses GPS and a Kalman filter, but the result has
+limited accuracy.  The system should be expanded to use wheel
+odometry, visual odometry, inertial measurement unit, and dead
+reckoning, as described in
+<FONT COLOR="#000080"><SPAN LANG="zxx"><U><A HREF="http://www.enviroteach.com/LandNavigation.pdf">http://www.enviroteach.com/LandNavigation.pdf</A></U></SPAN></FONT>
+. The Kalman filter will perform the sensor fusion. All sensors are
+currently available.</P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in">This code should combine the previous
+results from Odometer, Compass, INU, and GPS.  Obstacle detection is
+not used for navigation at this time. When combined with a good
+digital map (Lab 9), compass and odometer give a vehicle position.</P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in">In the future, sonar sensors could be
+combined with known building locations and a particle filter to get a
+location fix.</P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in"><A HREF="../Lab7_GPS/LandNavigation.html">Land
+Navigation</A></P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in"><B>Software</B></P>
+<P STYLE="margin-bottom: 0in"><A HREF="Elcano_C6_Kalman/Elcano_C6_Kalman.ino">Elcano_C6_Kalman</A></P>
+<P STYLE="margin-bottom: 0in">KalmanFilter.cpp</P>
+<P STYLE="margin-bottom: 0in">Matix.cpp</P>
+<P STYLE="margin-bottom: 0in">Matrix.h</P>
+<P STYLE="margin-bottom: 0in">Common.cpp</P>
+<P STYLE="margin-bottom: 0in">Common.h</P>
+<P STYLE="margin-bottom: 0in">IO.h</P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in">This software uses a Kalman filter to
+produce a running average of GPS readings, and logs them to an SD
+card. For this lab, the filter dimensions need to be expanded for
+other instruments.</P>
+<P STYLE="margin-bottom: 0in"><BR>
+</P>
+<P STYLE="margin-bottom: 0in">Status (3/11/14):  Arduino based GPS
+with SD card data-logger and Kalman filter was working in summer
+2012. Attempts to install it in late 2013 encountered difficulties.
+Code needs to get expanded to use other instruments.</P>
+</BODY>
+</HTML>
