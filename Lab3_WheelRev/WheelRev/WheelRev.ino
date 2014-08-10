@@ -7,7 +7,7 @@
    This routine computes the speed.
 */
 // CLICK_IN defined: use interrupt; not defined: simulate with timer
-#define CLICK_IN
+#define CLICK_IN 1
 #define LOOP_TIME_MS 1000
 #define CLICK_TIME_MS 1000
 
@@ -33,26 +33,41 @@ long SpeedCyclometer_mmPs = 0;
 // Speed in revolutions per second is independent of wheel size.
 float SpeedCyclometer_revPs = 0.0;//revolutions per sec
 volatile unsigned long TickTime = 0;
-long WheelRevmillis = 0;
+long WheelRev_ms = 0;
 unsigned long OldTick = 0;
 volatile unsigned long InterruptCount =0;
+#define IRQ_NONE 0
+#define IRQ_FIRST 1
+#define IRQ_RUNNING 2
+volatile int InterruptState = IRQ_NONE;
 unsigned long ShowTime_ms;
 
 /*---------------------------------------------------------------------------------------*/ 
 // WheelRev is called by an interrupt.
 void WheelRev()
 {
+    static int flip = 0;
     unsigned long tick;   
     noInterrupts();
     tick = millis();
+    if (InterruptState != IRQ_RUNNING)
+    // Need to process 1st two interrupts before results are meaningful.
+        InterruptState++;
+
     if (tick - TickTime > MinTickTime_ms)
     {
         TickTime = tick;
         InterruptCount++;
     }
+    if (flip)
+        digitalWrite(13, LOW);
+    else
+        digitalWrite(13, HIGH);
+    flip =!flip;  
+    
     interrupts();
 }
-
+/*---------------------------------------------------------------------------------------*/ 
 void setup() 
 { 
     Serial.begin(9600);//serial monitor
@@ -60,7 +75,7 @@ void setup()
     pinMode(13, OUTPUT); //led
     digitalWrite(13, HIGH);//turn LED on
     
-    pinMode(2, INPUT_PULLUP);//pulls input HIGH
+    pinMode(2, INPUT);//pulls input HIGH
     float MinTick = WHEEL_DIAMETER_MM * PI;
 //    Serial.print (" MinTick = ");
 //    Serial.println (MinTick);
@@ -89,119 +104,131 @@ void setup()
     // indicating that we have not moved.
     // TickTime would overflow after days of continuous operation, causing a glitch of
     // a display of zero speed.  It is unlikely that we have enough battery power to ever see this.
-    OldTick = 3 + TickTime;
+    OldTick = TickTime;
     ShowTime_ms = TickTime;
     InterruptCount = 0;
+    WheelRev_ms = 0;
+    InterruptState = IRQ_NONE;
 #ifdef CLICK_IN
     attachInterrupt (0, WheelRev, RISING);//pin 2 on Mega
 #endif
     Serial.println("setup complete");
 }
-
+/*---------------------------------------------------------------------------------------*/ 
 void loop() 
 {
     int i, cycles;
     unsigned long time, endTime;
       time = millis();
-  if (LOOP_TIME_MS > CLICK_TIME_MS)
-  {  // high speed
-    cycles = LOOP_TIME_MS / CLICK_TIME_MS;
- //delay until endTime 
-  //keeps a constant rate of loop calls, 
-  //but don't count time in loop
-    for (i=0; i<cycles; i++)
-    {
-      endTime = time + CLICK_TIME_MS ;//loop at 0.25 sec
-      while (time < endTime)
-      {
-         time = millis();
-      }
+    if (LOOP_TIME_MS > CLICK_TIME_MS)
+    {  // high speed
+         cycles = LOOP_TIME_MS / CLICK_TIME_MS;
+         // delay until endTime 
+         // keeps a constant rate of loop calls, but don't count time in loop
+        for (i=0; i<cycles; i++)
+        {
+            endTime = time + CLICK_TIME_MS ;//loop at 0.25 sec
+            while (time < endTime)
+            {
+                time = millis();
+            }
 #ifndef CLICK_IN      
-      WheelRev();
+           WheelRev();
+#endif
+        }
+        show_speed();
+    }
+    else  // low speed
+    {
+        cycles = CLICK_TIME_MS / LOOP_TIME_MS;
+        for (i=0; i<cycles; i++)
+        {
+            endTime = time + LOOP_TIME_MS ;
+            while (time < endTime)
+            {
+                time = millis();
+            }
+            show_speed();
+        }
+#ifndef CLICK_IN      
+        WheelRev();
+        show_speed();
 #endif
     }
-    show_speed();
-  }
-  else  // low speed
-  {
-    cycles = CLICK_TIME_MS / LOOP_TIME_MS;
-   for (i=0; i<cycles; i++)
-    {
-      endTime = time + LOOP_TIME_MS ;
-      while (time < endTime)
-      {
-         time = millis();
-      }
-      show_speed();
-    }
-#ifndef CLICK_IN      
-      WheelRev();
-      show_speed();
-#endif
-    
-  }
 }
+/*---------------------------------------------------------------------------------------*/ 
 void show_speed()
 {
-   ShowTime_ms = millis();	
-  //check if velocity has gone to zero
+    ShowTime_ms = millis();	
+  // check if velocity has gone to zero
 //  Serial.print (" Times: Show: ");
 //  Serial.print (ShowTime_ms);
+//  Serial.print (" OldTick: ");
+//  Serial.print (OldTick);
 //  Serial.print (", Tick: ");
 //  Serial.println (TickTime);
 
     if(ShowTime_ms - TickTime > MaxTickTime_ms)
     {  // stopped
-       SpeedCyclometer_mmPs = 0;
-       SpeedCyclometer_revPs = 0;
+        SpeedCyclometer_mmPs = 0;
+        SpeedCyclometer_revPs = 0;
     }
     else
     {  // moving
-      register int revolutions;
-      if (TickTime > OldTick)
-      {  // have new data
-         noInterrupts();
-      	 WheelRevmillis = TickTime - OldTick;
-         revolutions = InterruptCount;
-         OldTick = TickTime;
-         InterruptCount = 0;
-         interrupts();
+        int revolutions;
+        if (InterruptState == IRQ_RUNNING && TickTime > OldTick)
+        {  // have new data
+            noInterrupts();
+      	    WheelRev_ms = TickTime - OldTick;
+            revolutions = InterruptCount;
+            OldTick = TickTime;
+            InterruptCount = 0;
+            interrupts();
       
-         float Circum_mm = (revolutions*WHEEL_DIAMETER_MM * PI);
-         if (WheelRevmillis > 0)
-         {
-             SpeedCyclometer_mmPs  = (Circum_mm * 1000) / WheelRevmillis;
-             SpeedCyclometer_revPs = (revolutions*2*PI*1000.0) / WheelRevmillis;
+            float Circum_mm = (WHEEL_DIAMETER_MM * PI);
+            if (WheelRev_ms > 0)
+            {
+                SpeedCyclometer_revPs = (revolutions*1000.0) / WheelRev_ms;
+                SpeedCyclometer_mmPs  = Circum_mm * SpeedCyclometer_revPs;
+            }
+            else
+            {
+                SpeedCyclometer_mmPs = 0;
+                SpeedCyclometer_revPs = 0;
+            }
+        }
+        if (InterruptState == IRQ_FIRST)
+        {
+            noInterrupts();
+            OldTick = TickTime;
+            InterruptCount = 0;
+            interrupts();
          }
-         else
-         {
-             SpeedCyclometer_mmPs = 0;
-             SpeedCyclometer_revPs = 0;
-         }
-      }
 //      Serial.print (" revolutions = ");
 //      Serial.print (revolutions);
+//      Serial.print (" state = ");
+//      Serial.print (InterruptState);
     }
   
     unsigned long WheelRev_s, WheelRevFraction_s;  
-//    Serial.print("; WheelRevmillis = ");
-//    Serial.println (WheelRevmillis);
-    Serial.print(" ms ");
-    Serial.print("speed: ");
+//  Serial.print("; WheelRev_ms = ");
+//  Serial.println (WheelRev_ms);
+//  Serial.print(" ms ");
+//  Serial.print("speed: ");
     Serial.print(SpeedCyclometer_mmPs/1000);
     Serial.print(".");    
     Serial.print(SpeedCyclometer_mmPs%1000);
     Serial.print(" m/s; ");
     Serial.print(SpeedCyclometer_revPs);
-    Serial.print(" Rad/s");
-//    Serial.print(" last interval at: ");
-//    unsigned long Interval_ms = ShowTime_ms - TickTime;
-//    WheelRev_s = Interval_ms / 1000;
-//    WheelRevFraction_s = Interval_ms % 1000;
-//    Serial.print (WheelRev_s);
-//    Serial.print(".");
-//    Serial.print (WheelRevFraction_s);
-//    Serial.print(" s ");
+    Serial.print(" Rev/s");
+//  Serial.print(" last interval at: ");
+//  unsigned long Interval_ms = ShowTime_ms - TickTime;
+//  WheelRev_s = Interval_ms / 1000;
+//  WheelRevFraction_s = Interval_ms % 1000;
+//  Serial.print (WheelRev_s);
+//  Serial.print(".");
+//  Serial.print (WheelRevFraction_s);
+//  Serial.print(" s ");
     Serial.print("; ");
     Serial.print (SpeedCyclometer_mmPs*3600.0/MEG);
     Serial.print(" km/h, ");
@@ -209,6 +236,5 @@ void show_speed()
     Serial.print(" distance traveled: ");
     Serial.print (Odometer_m);
     Serial.println(" m "); 
-
 }
  
