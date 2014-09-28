@@ -35,7 +35,6 @@ float SpeedCyclometer_revPs = 0.0;//revolutions per sec
 volatile unsigned long TickTime = 0;
 long WheelRev_ms = 0;
 unsigned long OldTick = 0;
-volatile unsigned long InterruptCount =0;
 #define IRQ_NONE 0
 #define IRQ_FIRST 1
 #define IRQ_RUNNING 2
@@ -56,8 +55,8 @@ void WheelRev()
 
     if (tick - TickTime > MinTickTime_ms)
     {
+        OldTick = TickTime;
         TickTime = tick;
-        InterruptCount++;
     }
     if (flip)
         digitalWrite(13, LOW);
@@ -106,7 +105,6 @@ void setup()
     // a display of zero speed.  It is unlikely that we have enough battery power to ever see this.
     OldTick = TickTime;
     ShowTime_ms = TickTime;
-    InterruptCount = 0;
     WheelRev_ms = 0;
     InterruptState = IRQ_NONE;
 #ifdef CLICK_IN
@@ -160,6 +158,11 @@ void loop()
 void show_speed()
 {
     ShowTime_ms = millis();	
+   if (InterruptState == IRQ_NONE || InterruptState == IRQ_FIRST)  // no OR 1 interrupts
+   {
+       SpeedCyclometer_mmPs = 0;
+       SpeedCyclometer_revPs = 0;
+   } 
   // check if velocity has gone to zero
 //  Serial.print (" Times: Show: ");
 //  Serial.print (ShowTime_ms);
@@ -175,35 +178,21 @@ void show_speed()
     }
     else
     {  // moving
-        int revolutions;
-        if (InterruptState == IRQ_RUNNING && TickTime > OldTick)
+        WheelRev_ms = max(TickTime - OldTick, ShowTime_ms - TickTime);
+        if (InterruptState == IRQ_RUNNING)
         {  // have new data
-            noInterrupts();
-      	    WheelRev_ms = TickTime - OldTick;
-            revolutions = InterruptCount;
-            OldTick = TickTime;
-            InterruptCount = 0;
-            interrupts();
       
             float Circum_mm = (WHEEL_DIAMETER_MM * PI);
             if (WheelRev_ms > 0)
             {
-                SpeedCyclometer_revPs = (revolutions*1000.0) / WheelRev_ms;
+                SpeedCyclometer_revPs = 1000.0 / WheelRev_ms;
                 SpeedCyclometer_mmPs  = Circum_mm * SpeedCyclometer_revPs;
-            }
-            else
+            }            else
             {
                 SpeedCyclometer_mmPs = 0;
                 SpeedCyclometer_revPs = 0;
             }
         }
-        if (InterruptState == IRQ_FIRST)
-        {
-            noInterrupts();
-            OldTick = TickTime;
-            InterruptCount = 0;
-            interrupts();
-         }
 //      Serial.print (" revolutions = ");
 //      Serial.print (revolutions);
 //      Serial.print (" state = ");

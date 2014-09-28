@@ -30,25 +30,41 @@ long SpeedCyclometer_mmPs = 0;
 // Speed in revolutions per second is independent of wheel size.
 float SpeedCyclometer_revPs = 0.0;//revolutions per sec
 volatile unsigned long TickTime = 0;
-long WheelRevmillis = 0;
-unsigned long OldTick = 0;
-volatile unsigned long InterruptCount =0;
+long WheelRev_ms = 0;
+volatile unsigned long OldTick = 0;
+// volatile unsigned long InterruptCount =0;
+#define IRQ_NONE 0
+#define IRQ_FIRST 1
+#define IRQ_RUNNING 2
+volatile int InterruptState = IRQ_NONE;
 unsigned long ShowTime_ms;
 
 /*---------------------------------------------------------------------------------------*/ 
 // WheelRev is called by an interrupt.
 void WheelRev()
 {
+    static int flip = 0;
     unsigned long tick;   
     noInterrupts();
     tick = millis();
+    if (InterruptState != IRQ_RUNNING)
+    // Need to process 1st two interrupts before results are meaningful.
+        InterruptState++;
+
     if (tick - TickTime > MinTickTime_ms)
     {
+        OldTick = TickTime;
         TickTime = tick;
-        InterruptCount++;
     }
+    if (flip)
+        digitalWrite(13, LOW);
+    else
+        digitalWrite(13, HIGH);
+    flip =!flip;  
+    
     interrupts();
 }
+/*---------------------------------------------------------------------------------------*/ 
 
 void setup() 
 { 
@@ -58,7 +74,7 @@ void setup()
     pinMode(13, OUTPUT); //led
     digitalWrite(13, HIGH);//turn LED on
     
-    pinMode(2, INPUT_PULLUP);//pulls input HIGH
+    pinMode(2, INPUT);//pulls input HIGH
     float MinTick = WHEEL_DIAMETER_MM * PI;
 //    Serial.print (" MinTick = ");
 //    Serial.println (MinTick);
@@ -87,15 +103,13 @@ void setup()
     // indicating that we have not moved.
     // TickTime would overflow after days of continuous operation, causing a glitch of
     // a display of zero speed.  It is unlikely that we have enough battery power to ever see this.
-    OldTick = 3 + TickTime;
+    OldTick = TickTime;
     ShowTime_ms = TickTime;
-    InterruptCount = 0;
-    tone(2, 32); // speed signal
-#ifdef CLICK_IN
+    InterruptState = IRQ_NONE;
     attachInterrupt (0, WheelRev, RISING);//pin 2 on Mega
-#endif
     Serial.println("setup complete");
 }
+/*---------------------------------------------------------------------------------------*/ 
 
 void loop() 
 {
@@ -115,9 +129,7 @@ void loop()
       {
          time = millis();
       }
-#ifndef CLICK_IN      
       WheelRev();
-#endif
     }
     show_speed();
   }
@@ -132,17 +144,18 @@ void loop()
          time = millis();
       }
       show_speed();
-    }
-#ifndef CLICK_IN      
-      WheelRev();
-      show_speed();
-#endif
-    
+    }    
   }
 }
+/*---------------------------------------------------------------------------------------*/ 
 void show_speed()
 {
    ShowTime_ms = millis();	
+   if (InterruptState == IRQ_NONE || InterruptState == IRQ_FIRST)  // no OR 1 interrupts
+   {
+       SpeedCyclometer_mmPs = 0;
+       SpeedCyclometer_revPs = 0;
+   } 
   //check if velocity has gone to zero
 
     if(ShowTime_ms - TickTime > MaxTickTime_ms)
@@ -152,22 +165,16 @@ void show_speed()
     }
     else
     {  // moving
-      register int revolutions;
-      if (TickTime > OldTick)
-      {  // have new data
-         noInterrupts();
-      	 WheelRevmillis = TickTime - OldTick;
-         revolutions = InterruptCount;
-         OldTick = TickTime;
-         InterruptCount = 0;
-         interrupts();
+        WheelRev_ms = max(TickTime - OldTick, ShowTime_ms - TickTime);
+        if (InterruptState == IRQ_RUNNING)
+        {  // have new data
       
-         float Circum_mm = (revolutions*WHEEL_DIAMETER_MM * PI);
-         if (WheelRevmillis > 0)
-         {
-             SpeedCyclometer_mmPs  = (Circum_mm * 1000) / WheelRevmillis;
-             SpeedCyclometer_revPs = (revolutions*2*PI*1000.0) / WheelRevmillis;
-         }
+            float Circum_mm = (WHEEL_DIAMETER_MM * PI);
+            if (WheelRev_ms > 0)
+            {
+                SpeedCyclometer_revPs = 1000.0 / WheelRev_ms;
+                SpeedCyclometer_mmPs  = Circum_mm * SpeedCyclometer_revPs;
+            }
          else
          {
              SpeedCyclometer_mmPs = 0;

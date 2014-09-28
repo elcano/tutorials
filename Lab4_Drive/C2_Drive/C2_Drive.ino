@@ -295,12 +295,12 @@ void Throttle_PID(long error_speed_mmPs)
   }
   // else maintain current speed
   //Serial.print("Thottle Brake,");  // csv for spreadsheet
-/*  Serial.print(throttle_control);
+  Serial.print(throttle_control);
   Serial.print(",");
   Serial.print(brake_control);
   Serial.print(",");
   Serial.print(drive_speed_mmPs);  Serial.print(",");
-  Serial.println(sensor_speed_mmPs); */
+  Serial.println(sensor_speed_mmPs); 
 }
 
 /*---------------------------------------------------------------------------------------*/
