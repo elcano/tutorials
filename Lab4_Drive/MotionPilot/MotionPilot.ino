@@ -15,19 +15,39 @@
    The C2 computer has the task of controlling the vehicle to the desired speed.
    */
 #include <stdlib.h>
-//#include "Arduino.h"
 
 #define STEPS 3
 #define LOOP_TIME_MS 250
 #define WHEEL_DIAMETER_MM 397
 #define BUFFER_SIZE 80
-//typedef char *Strings;
-//#define Strings char *
 
+/*
+  The standard design uses several microcontrollers:
+  C6 gets the wheel click interrupt and other speed and location information.
+  C6 -> C4, which reads the destination and map and finds a route
+  C4 -> C3, which comes up with speed and steering to foollow the route
+  C3 -> C2, which controls the actuators to the desired speed and steering.
+  
+  C4 is not yet part of this test, so the serial output of C6 can go directly to C3.
+  
+  This MotionPilot rountine is the speed part of C3. In operation, it will receive actual and
+  desired speeds over the serial line. C3 is designed to run an Arduino Micro or Nano.
+  
+  For testing, both the WheelClick functions of C6 and the functions of C3 can be combined on a single
+  Arduino Mega. If SINGLE_BOARD is defined, the WheelClick routine is computed on an Arduino Mega,
+  which sends the resulting speed out on its SerialODoOut line, which is wired to its SerialDrive 
+  receive line. 
+*/
+//#define SINGLE_BOARD
 #define SerialMonitor Serial
 #define SerialOdoOut  Serial1
+#ifdef SINGLE_BOARD   // Mega
 #define SerialDrive   Serial2
-
+#else  // OK for Micro or Leonardo
+#define SerialDrive   Serial1
+// TO DO: Are we using speed in mm/sec or revolutions/sec?
+#define SpeedCyclometer_revPs  sensor_speed_mmPs
+#endif
 
 // globals
 long int sensor_speed_mmPs = 0;
@@ -562,8 +582,8 @@ void loop()
     SerialMonitor.println("}\0");
 }
 /*=======================================================================================*/
+#ifdef SINGLE_BOARD
 /*=======================================================================================*/
-
 /* Wheel Revolution Interrupt routine
    Ben Spencer 10/21/13
    Modified by Tyler Folsom 3/16/14
@@ -597,7 +617,6 @@ float SpeedCyclometer_revPs = 0.0;//revolutions per sec
 volatile unsigned long TickTime = 0;
 long WheelRev_ms = 0;
 unsigned long OldTick = 0;
-volatile unsigned long InterruptCount =0;
 #define IRQ_NONE 0
 #define IRQ_FIRST 1
 #define IRQ_RUNNING 2
@@ -618,8 +637,8 @@ void WheelRev()
 
     if (tick - TickTime > MinTickTime_ms)
     {
+        OldTick = TickTime;
         TickTime = tick;
-        InterruptCount++;
     }
     if (flip)
         digitalWrite(13, LOW);
@@ -630,13 +649,11 @@ void WheelRev()
     interrupts();
 }
 /*---------------------------------------------------------------------------------------*/ 
-
+#endif  // SINGLE_BOARD
 void setupWheelRev() 
 { 
-//    SerialMonitor.begin(115200);//serial monitor
-    SerialOdoOut.begin(115200); // C6 to C4
-    
-    
+#ifdef SINGLE_BOARD
+    SerialOdoOut.begin(115200); // C6 to C4        
     pinMode(13, OUTPUT); //led
     digitalWrite(13, LOW);//turn LED off
     
@@ -671,7 +688,6 @@ void setupWheelRev()
     // a display of zero speed.  It is unlikely that we have enough battery power to ever see this.
     OldTick = TickTime;
     ShowTime_ms = TickTime;
-    InterruptCount = 0;
     InterruptState = IRQ_NONE;
 #ifdef CLICK_IN
     attachInterrupt (0, WheelRev, RISING);//pin 2 on Mega
@@ -682,14 +698,23 @@ void setupWheelRev()
     SerialMonitor.println(OldTick);
      
     SerialMonitor.println("setup complete");
+#endif // SINGLE_BOARD    
 }
 /*---------------------------------------------------------------------------------------*/ 
 
 void show_speed()
 {
-   ShowTime_ms = millis();    
-  //check if velocity has gone to zero
+#ifdef SINGLE_BOARD
+   ShowTime_ms = millis();       
+   if (InterruptState == IRQ_NONE || InterruptState == IRQ_FIRST)  // no OR 1 interrupts
+   {
+       SpeedCyclometer_mmPs = 0;
+       SpeedCyclometer_revPs = 0;
+   } 
 
+  //check if velocity has gone to zero
+  else
+  {
     if(ShowTime_ms - TickTime > MaxTickTime_ms)
     {  // stopped
         SerialMonitor.print("Stop. Showtime: ");
@@ -701,20 +726,14 @@ void show_speed()
     }
     else
     {  // moving
-        int revolutions;
-        if (InterruptState == IRQ_RUNNING && TickTime > OldTick)
+        WheelRev_ms = max(TickTime - OldTick, ShowTime_ms - TickTime);
+        if (InterruptState == IRQ_RUNNING)
         {  // have new data
-            noInterrupts();
-            WheelRev_ms = TickTime - OldTick;
-            revolutions = InterruptCount;
-            OldTick = TickTime;
-            InterruptCount = 0;
-            interrupts();
       
             float Circum_mm = (WHEEL_DIAMETER_MM * PI);
             if (WheelRev_ms > 0)
             {
-                SpeedCyclometer_revPs = (revolutions*1000.0) / WheelRev_ms;
+                SpeedCyclometer_revPs = 1000.0 / WheelRev_ms;
                 SpeedCyclometer_mmPs  = Circum_mm * SpeedCyclometer_revPs;
             }
             else
@@ -723,19 +742,10 @@ void show_speed()
                 SpeedCyclometer_revPs = 0;
             }
         }
-        if (InterruptState == IRQ_FIRST)
-        {
-            noInterrupts();
-            OldTick = TickTime;
-            InterruptCount = 0;
-            interrupts();
-         }
+
+      }
     }
-  // Serial 2 connects C6 to C4
-    SerialOdoOut.print("SENSOR {Speed ");
-    SerialOdoOut.print(SpeedCyclometer_revPs);
-    SerialOdoOut.println("}\0");
- // C4 to C3
+  // C4 to C3
  // C3 to C2 via pin 18 on DB25
  // Short Pin 18 to 19 (Or have C2 repeat what it received)
  // Pin 19 on DB25 goes to SerialOdoOut input.
@@ -747,6 +757,10 @@ void show_speed()
     SerialMonitor.print(SpeedCyclometer_revPs);
     SerialMonitor.println("}\0");
     Odometer_m += (float)(LOOP_TIME_MS * SpeedCyclometer_mmPs) / MEG;
+#endif // SINGLE_BOARD    
+  // Serial 2 connects C6 to C4
+    SerialOdoOut.print("SENSOR {Speed ");
+    SerialOdoOut.print(SpeedCyclometer_revPs);
+    SerialOdoOut.println("}\0");
 }
- 
 

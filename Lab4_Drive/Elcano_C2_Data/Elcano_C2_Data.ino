@@ -40,7 +40,7 @@
 // Values to send over DAC
 const int FullThrottle =  227;   // 3.63 V
 const int MinimumThrottle = 50; // was 70;  // Throttle has no effect until 1.2 V
-const int TestThrottle = MinimumThrottle + (FullThrottle - MinimumThrottle)/2;
+const int TestThrottle = MinimumThrottle + (FullThrottle - MinimumThrottle);
 // Values to send on PWM to get response of actuators
 const int FullBrake = 167;  // start with a conservative value; could go as high as 255;  
 const int NoBrake = 207; // start with a conservative value; could go as low as 127;
@@ -217,11 +217,15 @@ void LogData(unsigned long time)
 {  // Comma separated values to transfer to spread-sheet
   if (time < start_time + RAMP_UP_TIME + STEADY_TIME + COAST_TIME)
   {
+    int analog = analogRead(2);
     Serial.print(time); Serial.print(',');
     Serial.print(SpeedCyclometer_mmPs); Serial.print(',');
     Serial.print(throttle_control); Serial.print(',');
+    Serial.print(analog);  Serial.print(',');
     Serial.println(brake_control);
   }
+  else
+      start_time = millis();   // next cycle
   
 }
 /*---------------------------------------------------------------------------------------*/
@@ -370,8 +374,8 @@ This is as documented; with gain of 2, maximum output is 2 * Vref
    A cyclometer gives a click once per revolution. 
    This routine computes the speed.
 */
-// CLICK_IN defined: use interrupt; not defined: simulate with timer
 #define SerialMonitor Serial
+// CLICK_IN defined: use interrupt; not defined: simulate with timer
 #define CLICK_IN 1
 #define LOOP_TIME_MS 1000
 #define CLICK_TIME_MS 1000
@@ -466,8 +470,7 @@ void setupWheelRev()
     // a display of zero speed.  It is unlikely that we have enough battery power to ever see this.
     OldTick = TickTime;
     ShowTime_ms = TickTime;
- //   InterruptCount = 0;
-    InterruptState = IRQ_NONE;
+     InterruptState = IRQ_NONE;
     attachInterrupt (1, WheelRev, RISING);//pin 3 on C2 Mega
     SerialMonitor.print("TickTime: ");
     SerialMonitor.print(TickTime);
