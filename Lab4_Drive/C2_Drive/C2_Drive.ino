@@ -67,7 +67,7 @@
 
 // Values to send over DAC
 const int FullThrottle =  227;   // 3.63 V
-const int MinimumThrottle = 70;  // Throttle has no effect until 1.2 V
+const int MinimumThrottle = 50;  // Throttle has no effect until 1.2 V
 // Values to send on PWM to get response of actuators
 const int FullBrake = 167;  // start with a conservative value; could go as high as 255;  
 const int NoBrake = 207; // start with a conservative value; could go as low as 127;
@@ -77,15 +77,13 @@ const int Straight = 187;
 const int HardRight = 126;
 
 // globals
-long sensor_speed_mmPs = 0;
-long drive_speed_mmPs = 0;
+float sensor_speed_mmPs = 0;
+float drive_speed_mmPs = 0;
 char IncomingMessage[BUFFER_SIZE];
 int  InIndex=0;
 int  throttle_control = MinimumThrottle;
 int  brake_control = FullBrake;
 int  steer_control = Straight;
-long speed_errors[ERROR_HISTORY];
-
 
 /*  Elcano #1 Servo range is 50 mm for brake, 100 mm for steering.
 
@@ -111,20 +109,13 @@ long speed_errors[ERROR_HISTORY];
     there appear to be different (PWM, position) pairs when retracting or extending.
     Motor speed is probably controlled by the current on the red or black line.   
 */
-/*---------------------------------------------------------------------------------------*/
-void initialize()
-{
-  for (int i = 0; i < ERROR_HISTORY; i++)
-  {
-      speed_errors[i] = 0;
-  }
- 
-}
+
 /*---------------------------------------------------------------------------------------*/
 void setup()
 {
-    //Set up pin modes and interrupts, call serial.begin and call initialize.
+    //Set up pin modes and interrupts, call serial.begin.
     Serial.begin(115200); // monitor
+    Serial.println("Start initialization");
     Serial3.begin(115200); // C3 to C2;  C2 to C6
 	/* A typical message is 20 ASCII characters of 20 bits each
 	   (2 8-bit bytes / character + start bit + stop bit)
@@ -150,13 +141,9 @@ void setup()
     pinMode(AccelerateJoystick, INPUT);
     pinMode(SteerJoystick, INPUT);
     pinMode(JoystickCenter, INPUT);
-
-    Serial.println("Start initialization");        
-    initialize();
      
     moveBrake(NoBrake);   // release brake
     Serial.println("Initialized");
-     
 }
 /*---------------------------------------------------------------------------------------*/
 char * GetWord(char * major, char * str)
@@ -183,7 +170,7 @@ float GetNumber(char *minor, char*Args)
    // change back to }
    *end = '}';
    // convert speed from km/h to mm/s
-//   sensor_speed_mmPs = (long)(data * 1000000.0 / 3600.0);
+//   sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
    return data;
 }
 /*---------------------------------------------------------------------------------------*/
@@ -194,6 +181,7 @@ int ProcessMessage ()
 {
     int kind = MSG_NONE;
     float data;
+    Serial.println(IncomingMessage);
 	// Determine if message is "SENSOR {Speed xxx.xx}"	
 	char * Args = GetWord ("SENSOR", IncomingMessage);
 	if (Args != NULL)
@@ -202,7 +190,7 @@ int ProcessMessage ()
     	    // convert speed from km/h to mm/s
     	    if (data != NaN) 
             {
-                sensor_speed_mmPs = (long)(data * 1000000.0 / 3600.0);
+                sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
                 kind = MSG_SENSOR;
             }
 	}
@@ -214,14 +202,14 @@ int ProcessMessage ()
     	    // convert speed from rev/s to mm/s
     	    if (data != NaN) 
             {
-                drive_speed_mmPs = (long)(data * PI * WHEEL_DIAMETER_MM);
+                drive_speed_mmPs = (float)(data * PI * WHEEL_DIAMETER_MM);
                 kind = MSG_DRIVE;
             }
 	}
     return kind;
 }
 /*---------------------------------------------------------------------------------------*/
-void Throttle_PID(long error_speed_mmPs)
+void Throttle_PID(float error_speed_mmPs)
 
 /* Use throttle and brakes to keep vehicle at a desired speed.
    A PID controller uses the error in the set point to increase or decrease the juice.
@@ -238,19 +226,19 @@ void Throttle_PID(long error_speed_mmPs)
    VanDoren Proportional Integral Derivative Control
 */
 { 
-  static long speed_errors[ERROR_HISTORY];
+  static float speed_errors[ERROR_HISTORY];
   static int error_index = 0;
   int i;
-  static long error_sum = 0;
-  long mean_speed_error = 0;
-  long extrapolated_error = 0;
-  long PID_error;
-  const float P_tune = 0.4;
-  const float I_tune = 0.5;
-  const float D_tune = 0.1;
-  const long speed_tolerance_mmPs = 75;  // about 0.2 mph
+  static float error_sum = 0;
+  float mean_speed_error = 0;
+  float extrapolated_error = 0;
+  float PID_error;
+  const float P_tune = 0.1; //0.4;
+  const float I_tune = 0.0; //0.5;
+  const float D_tune = 0.0; //0.1;
+  const float speed_tolerance_mmPs = 75.0;  // about 0.2 mph
   // setting the max_error affacts control: anything bigger gets maximum response
-  const long max_error_mmPs = 2500; // about 5.6 mph
+  const float max_error_mmPs = 2500.0; // about 5.6 mph
 
   error_sum -= speed_errors[error_index];
   speed_errors[error_index] = error_speed_mmPs;
@@ -262,15 +250,18 @@ void Throttle_PID(long error_speed_mmPs)
   PID_error = P_tune * error_speed_mmPs 
             + I_tune * mean_speed_error
             + D_tune * extrapolated_error;
+  Serial.print("PID_error: ");
+  Serial.print(PID_error);
   if (PID_error > speed_tolerance_mmPs)
   {  // too fast
-    long throttle_decrease = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
+    Serial.print(" too fast");
+    float throttle_decrease = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
     throttle_control -= throttle_decrease;
     if (throttle_control < MinimumThrottle)
         throttle_control = MinimumThrottle;
     moveVehicle(throttle_control);
     
-    long brake_increase = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
+    float brake_increase = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
     // NoBrake = 207; FullBrake = 167; 
     brake_control -= brake_increase;
     if (brake_control < FullBrake)
@@ -279,14 +270,15 @@ void Throttle_PID(long error_speed_mmPs)
   }
   else if (PID_error < speed_tolerance_mmPs)
   {  // too slow
-    long throttle_increase = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
+    Serial.print(" too slow");
+    float throttle_increase = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
     throttle_control += throttle_increase;
     if (throttle_control > FullThrottle)
         throttle_control = FullThrottle;
     moveVehicle(throttle_control);
     
     // release brakes
-    long brake_decrease = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
+    float brake_decrease = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
     // NoBrake = 207; FullBrake = 167; 
     brake_control += brake_decrease;
     if (brake_control > NoBrake)
@@ -294,6 +286,7 @@ void Throttle_PID(long error_speed_mmPs)
     moveBrake(brake_control);
   }
   // else maintain current speed
+  Serial.println();
   //Serial.print("Thottle Brake,");  // csv for spreadsheet
   Serial.print(throttle_control);
   Serial.print(",");
@@ -325,7 +318,7 @@ void loop()
 		    InIndex = 0;
                     if (kind != MSG_SENSOR)  // Sensor messages originate from C6
 		        Serial3.print(IncomingMessage); // pass msg on to C6
-                    Serial.println(IncomingMessage);  // for monitor
+                    //Serial.println(IncomingMessage);  // for monitor
 		}
 		else
 		{
@@ -336,7 +329,7 @@ void loop()
 	time = millis();
     }
  
-  long error_speed_mmPs = drive_speed_mmPs - sensor_speed_mmPs;
+  float error_speed_mmPs = sensor_speed_mmPs - drive_speed_mmPs;
   Throttle_PID(error_speed_mmPs);
   
  // apply steering
