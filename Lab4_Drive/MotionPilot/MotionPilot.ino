@@ -38,12 +38,22 @@
   which sends the resulting speed out on its SerialODoOut line, which is wired to its SerialDrive 
   receive line. 
 */
-//#define SINGLE_BOARD
+#define SOFT_SERIAL
+#define SINGLE_BOARD
 #define SerialMonitor Serial
-#define SerialOdoOut  Serial1
+
 #ifdef SINGLE_BOARD   // Mega
+#ifdef SOFT_SERIAL
+#include <SoftwareSerial.h>
+SoftwareSerial SerialDrive(28, 26);
+#define SerialOdoOut SerialDrive
+#else
+#define SerialOdoOut  Serial1
 #define SerialDrive   Serial2
+#endif // SOFT_SERIAL
+
 #else  // OK for Micro or Leonardo
+#define SerialOdoOut  Serial1
 #define SerialDrive   Serial1
 // TO DO: Are we using speed in mm/sec or revolutions/sec?
 #define SpeedCyclometer_revPs  sensor_speed_mmPs
@@ -445,6 +455,7 @@ Initial:    InitializeSpeed (seg, measured_speed_mmPs);  // routine sets state.
    
 void setup() 
 { 
+
     sensor_speed_mmPs = 0;
     SerialMonitor.begin(115200); 
     SerialMonitor.print("\n\n\n");
