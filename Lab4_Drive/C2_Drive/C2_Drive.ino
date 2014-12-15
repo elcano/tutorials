@@ -1,18 +1,17 @@
 /*
  Elcano Contol Module C2 Basic: Bare bones low level control of vehicle.
  This code is the first step in moving the vehicle under high level control from the C3 Pilot. 
- 
+
  Throttle, brake and steering inputs can come from three sources: 
  1) On board joystick
      e.g. 
  2) Remotely controlled (RC) joystick and buttons
      e.g: HiTec Optic 5 RCS: http://hitecrcd.com/images/products/pdf/22_OPTIC_5_MANUAL_P.pdf
  3) An external high level computer, such as Arduino C3 Pilot.
- 
+
  Normally the vehicle will be configured to use either (1) or (2) for manual control. 
  Automatic control (3) is always an option.
 
- 
  The inputs consist of analog or Pulse wave Modulated (PWM) values.  Inputs are:
  1) Throttle
  2) Brake
@@ -27,17 +26,21 @@
     This turns control over to a high level computer and begins motion to the next waypoint.
     Waypoints are loaded into the higher level computer and are not directly settable for the C2 module.
     Once under computer control, manual control will be unresponsive.
-   
+
    Future enhancements can make transfer between manual and automatic control similar to automotive 
-   cruise control. 
- 
+   cruise control.
+
  Outputs are
  1) Analog 0-4 V signal for traction motor speed
  2) Pulse wave Modulated (PWM) signal for brakes.
  3) PWM signal for steering.
- 
- 
  */
+
+// The MegaShieldDB has a four channel Digital to Analog Converter (DAC).
+// Basic Arduino cannot write a true analog signal, but only PWM.
+// Many servos take PWM.
+// An electric bicycle (E-bike) throttle expects an analog signal.
+// We have found that feeding a pwm signal to an e-bike controller makes the motor chug at low speed.
 
 // Input/Output (IO) pin names for the MegaShieldDB printed circuit board (PCB)
 #include "IOPCB.h"
@@ -46,11 +49,6 @@
 //   Sketch  |  Import Library ... |  SPI
 // include the Serial Periferal Interface (SPI) library:
 #include <SPI.h>
-// The MegaShieldDB has a four channel Digital to Analog Converter (DAC).
-// Basic Arduino cannot write a true analog signal, but only PWM.
-// Many servos take PWM.
-// An electric bicycle (E-bike) throttle expects an analog signal.
-// We have found that feeding a pwm signal to an e-bike controller makes the motor chug at low speed.
 
 #ifndef TRUE
 #define TRUE 1
@@ -70,9 +68,9 @@ const int FullThrottle =  227;   // 3.63 V
 const int MinimumThrottle = 50;  // Throttle has no effect until 1.2 V
 // Values to send on PWM to get response of actuators
 const int FullBrake = 167;  // start with a conservative value; could go as high as 255;  
-const int NoBrake = 207; // start with a conservative value; could go as low as 127;
+const int NoBrake = 207;    // start with a conservative value; could go as low as 127;
 // Steering
-const int HardLeft = 250; //  could go as high as 255;
+const int HardLeft = 250;   //  could go as high as 255;
 const int Straight = 187;
 const int HardRight = 126;
 
@@ -117,13 +115,13 @@ void setup()
     Serial.begin(115200); // monitor
     Serial.println("Start initialization");
     Serial3.begin(115200); // C3 to C2;  C2 to C6
-	/* A typical message is 20 ASCII characters of 20 bits each
+    /* A typical message is 20 ASCII characters of 20 bits each
 	   (2 8-bit bytes / character + start bit + stop bit)
 	   At 115,200 bits/s, a typical message takes 3.5 ms.
 	   Thus there is about a 10 ms delay (best case) in passing 
 	   information from C6 to C2.
-	*/
-    
+     */
+
     // SPI: set the slaveSelectPin as an output:
     pinMode (SelectAB, OUTPUT);
     pinMode (SelectCD, OUTPUT);
@@ -134,45 +132,48 @@ void setup()
     SPI.begin(); 
     for (int channel = 0; channel < 4; channel++)
         DAC_Write (channel, 0);   // reset did not clear previous states
- 
+
     pinMode(Throttle, OUTPUT);
     pinMode(DiskBrake, OUTPUT);
     pinMode(Steer, OUTPUT);
     pinMode(AccelerateJoystick, INPUT);
     pinMode(SteerJoystick, INPUT);
     pinMode(JoystickCenter, INPUT);
-     
+
     moveBrake(NoBrake);   // release brake
     Serial.println("Initialized");
 }
+
 /*---------------------------------------------------------------------------------------*/
 char * GetWord(char * major, char * str)
 {
-	char * CSp1;
+    char * CSp1;
 
-	CSp1 = strstr(str, major);
-	if (CSp1!=NULL)
-	CSp1 += strlen(major);
-	return CSp1;
+    CSp1 = strstr(str, major);
+    if (CSp1!=NULL)
+        CSp1 += strlen(major);
+    return CSp1;
 }
+
 float GetNumber(char *minor, char*Args)
 {
-  float data = NaN;
-  if (Args == NULL) return data;
-  // SENSOR, so grab the new sensor_speed.
-  char * Number = GetWord(minor, Args);
-  if (Number==NULL) return data;
-   // change } to 0
-   char* end = strchr(Number, '}');
-   if (end == NULL) return NaN;
-   *end = '\0';
-   data = atof(Number);
-   // change back to }
-   *end = '}';
-   // convert speed from km/h to mm/s
-//   sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
-   return data;
+    float data = NaN;
+    if (Args == NULL) return data;
+    // SENSOR, so grab the new sensor_speed.
+    char * Number = GetWord(minor, Args);
+    if (Number==NULL) return data;
+    // change } to 0
+    char* end = strchr(Number, '}');
+    if (end == NULL) return NaN;
+    *end = '\0';
+    data = atof(Number);
+    // change back to }
+    *end = '}';
+    // convert speed from km/h to mm/s
+    // sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
+    return data;
 }
+
 /*---------------------------------------------------------------------------------------*/
 #define MSG_NONE 0
 #define MSG_SENSOR 1
@@ -182,35 +183,34 @@ int ProcessMessage ()
     int kind = MSG_NONE;
     float data;
     Serial.println(IncomingMessage);
-	// Determine if message is "SENSOR {Speed xxx.xx}"	
-	char * Args = GetWord ("SENSOR", IncomingMessage);
-	if (Args != NULL)
-	{	
-            data = GetNumber("Speed", Args);
-    	    // convert speed from km/h to mm/s
-    	    if (data != NaN) 
-            {
-                sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
-                kind = MSG_SENSOR;
-            }
-	}
-	// Determine if message is "DRIVE {Speed xxx.xx}"	
-        Args = GetWord ("DRIVE", IncomingMessage);
-	if (Args != NULL)
-	{	
-            data = GetNumber("Speed", Args);
-    	    // convert speed from rev/s to mm/s
-    	    if (data != NaN) 
-            {
-                drive_speed_mmPs = (float)(data * PI * WHEEL_DIAMETER_MM);
-                kind = MSG_DRIVE;
-            }
-	}
+    // Determine if message is "SENSOR {Speed xxx.xx}"	
+    char * Args = GetWord ("SENSOR", IncomingMessage);
+    if (Args != NULL)
+    {	
+        data = GetNumber("Speed", Args);
+        // convert speed from km/h to mm/s
+        if (data != NaN) 
+        {
+            sensor_speed_mmPs = (float)(data * 1000000.0 / 3600.0);
+            kind = MSG_SENSOR;
+        }
+    }
+    // Determine if message is "DRIVE {Speed xxx.xx}"	
+    Args = GetWord ("DRIVE", IncomingMessage);
+    if (Args != NULL)
+    {	
+        data = GetNumber("Speed", Args);
+        // convert speed from rev/s to mm/s
+        if (data != NaN) 
+        {
+            drive_speed_mmPs = (float)(data * PI * WHEEL_DIAMETER_MM);
+            kind = MSG_DRIVE;
+        }
+    }
     return kind;
 }
-/*---------------------------------------------------------------------------------------*/
-void Throttle_PID(float error_speed_mmPs)
 
+/*---------------------------------------------------------------------------------------*/
 /* Use throttle and brakes to keep vehicle at a desired speed.
    A PID controller uses the error in the set point to increase or decrease the juice.
    P = proportional; change based on present error
@@ -224,76 +224,78 @@ void Throttle_PID(float error_speed_mmPs)
    which is something of a black art.
    For more information, search for:
    VanDoren Proportional Integral Derivative Control
-*/
+ */
+void Throttle_PID(float error_speed_mmPs)
 { 
-  static float speed_errors[ERROR_HISTORY];
-  static int error_index = 0;
-  int i;
-  static float error_sum = 0;
-  float mean_speed_error = 0;
-  float extrapolated_error = 0;
-  float PID_error;
-  const float P_tune = 0.1; //0.4;
-  const float I_tune = 0.0; //0.5;
-  const float D_tune = 0.0; //0.1;
-  const float speed_tolerance_mmPs = 75.0;  // about 0.2 mph
-  // setting the max_error affacts control: anything bigger gets maximum response
-  const float max_error_mmPs = 2500.0; // about 5.6 mph
+    static float speed_errors[ERROR_HISTORY];
+    static int error_index = 0;
+    int i;
+    static float error_sum = 0;
+    float mean_speed_error = 0;
+    float extrapolated_error = 0;
+    float PID_error;
+    const float P_tune = 0.1; //0.4;
+    const float I_tune = 0.0; //0.5;
+    const float D_tune = 0.0; //0.1;
+    const float speed_tolerance_mmPs = 75.0;  // about 0.2 mph
+    // setting the max_error affacts control: anything bigger gets maximum response
+    const float max_error_mmPs = 2500.0; // about 5.6 mph
 
-  error_sum -= speed_errors[error_index];
-  speed_errors[error_index] = error_speed_mmPs;
-  error_sum += error_speed_mmPs;
-  mean_speed_error = error_sum / ERROR_HISTORY;
-  i = (error_index-1) % ERROR_HISTORY;
-  extrapolated_error = 2 * error_speed_mmPs - speed_errors[i];
-  
-  PID_error = P_tune * error_speed_mmPs 
+    error_sum -= speed_errors[error_index];
+    speed_errors[error_index] = error_speed_mmPs;
+    error_sum += error_speed_mmPs;
+    mean_speed_error = error_sum / ERROR_HISTORY;
+    i = (error_index-1) % ERROR_HISTORY;
+    extrapolated_error = 2 * error_speed_mmPs - speed_errors[i];
+
+    PID_error = P_tune * error_speed_mmPs 
             + I_tune * mean_speed_error
             + D_tune * extrapolated_error;
-  Serial.print("PID_error: ");
-  Serial.print(PID_error);
-  if (PID_error > speed_tolerance_mmPs)
-  {  // too fast
-    Serial.print(" too fast");
-    float throttle_decrease = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
-    throttle_control -= throttle_decrease;
-    if (throttle_control < MinimumThrottle)
-        throttle_control = MinimumThrottle;
-    moveVehicle(throttle_control);
-    
-    float brake_increase = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
-    // NoBrake = 207; FullBrake = 167; 
-    brake_control -= brake_increase;
-    if (brake_control < FullBrake)
-        brake_control = FullBrake;
-    moveBrake(brake_control);
-  }
-  else if (PID_error < speed_tolerance_mmPs)
-  {  // too slow
-    Serial.print(" too slow");
-    float throttle_increase = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
-    throttle_control += throttle_increase;
-    if (throttle_control > FullThrottle)
-        throttle_control = FullThrottle;
-    moveVehicle(throttle_control);
-    
-    // release brakes
-    float brake_decrease = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
-    // NoBrake = 207; FullBrake = 167; 
-    brake_control += brake_decrease;
-    if (brake_control > NoBrake)
-        brake_control = NoBrake;
-    moveBrake(brake_control);
-  }
-  // else maintain current speed
-  Serial.println();
-  //Serial.print("Thottle Brake,");  // csv for spreadsheet
-  Serial.print(throttle_control);
-  Serial.print(",");
-  Serial.print(brake_control);
-  Serial.print(",");
-  Serial.print(drive_speed_mmPs);  Serial.print(",");
-  Serial.println(sensor_speed_mmPs); 
+    Serial.print("PID_error: ");
+    Serial.print(PID_error);
+    if (PID_error > speed_tolerance_mmPs)
+    {  // too fast
+        Serial.print(" too fast");
+        float throttle_decrease = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
+        throttle_control -= throttle_decrease;
+        if (throttle_control < MinimumThrottle)
+            throttle_control = MinimumThrottle;
+        moveVehicle(throttle_control);
+
+        float brake_increase = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
+        // NoBrake = 207; FullBrake = 167; 
+        brake_control -= brake_increase;
+        if (brake_control < FullBrake)
+            brake_control = FullBrake;
+        moveBrake(brake_control);
+    }
+    else if (PID_error < speed_tolerance_mmPs)
+    {  // too slow
+        Serial.print(" too slow");
+        float throttle_increase = (FullThrottle - MinimumThrottle) * PID_error / max_error_mmPs;
+        throttle_control += throttle_increase;
+        if (throttle_control > FullThrottle)
+            throttle_control = FullThrottle;
+        moveVehicle(throttle_control);
+
+        // release brakes
+        float brake_decrease = (NoBrake - FullBrake) * PID_error / max_error_mmPs;
+        // NoBrake = 207; FullBrake = 167; 
+        brake_control += brake_decrease;
+        if (brake_control > NoBrake)
+            brake_control = NoBrake;
+        moveBrake(brake_control);
+    }
+    // else maintain current speed
+    Serial.println();
+    //Serial.print("Thottle Brake,");  // csv for spreadsheet
+    Serial.print(throttle_control);
+    Serial.print(",");
+    Serial.print(brake_control);
+    Serial.print(",");
+    Serial.print(drive_speed_mmPs);
+    Serial.print(",");
+    Serial.println(sensor_speed_mmPs); 
 }
 
 /*---------------------------------------------------------------------------------------*/
@@ -305,49 +307,51 @@ void loop()
     endTime = time + LOOP_TIME_MS ;
     while (time < endTime)
     {
-	if ( Serial3.available() > 0) 
-	{
-	    // read the incoming byte from C4:
-	    incomingByte =  Serial3.read();
-	    {
-		IncomingMessage[InIndex] = (char)(incomingByte);
-		if (IncomingMessage[InIndex] == '\0'
-		 || InIndex >= BUFFER_SIZE-1)
-		{
-		    int kind = ProcessMessage();  // see what we got
-		    InIndex = 0;
+        if ( Serial3.available() > 0) 
+        {
+            // read the incoming byte from C4:
+            incomingByte =  Serial3.read();
+            {
+                IncomingMessage[InIndex] = (char)(incomingByte);
+                if (IncomingMessage[InIndex] == '\0'
+                        || InIndex >= BUFFER_SIZE-1)
+                {
+                    int kind = ProcessMessage();  // see what we got
+                    InIndex = 0;
                     if (kind != MSG_SENSOR)  // Sensor messages originate from C6
-		        Serial3.print(IncomingMessage); // pass msg on to C6
+                        Serial3.print(IncomingMessage); // pass msg on to C6
                     //Serial.println(IncomingMessage);  // for monitor
-		}
-		else
-		{
-		    ++InIndex;    	
-		}
-	    }
-	}
-	time = millis();
+                }
+                else
+                {
+                    ++InIndex;    	
+                }
+            }
+        }
+        time = millis();
     }
- 
-  float error_speed_mmPs = sensor_speed_mmPs - drive_speed_mmPs;
-  Throttle_PID(error_speed_mmPs);
-  
- // apply steering
-  steer_control =  Straight;
-  moveSteer(steer_control); 
- 
+
+    float error_speed_mmPs = sensor_speed_mmPs - drive_speed_mmPs;
+    Throttle_PID(error_speed_mmPs);
+
+    // apply steering
+    steer_control =  Straight;
+    moveSteer(steer_control); 
+
 }
-/*---------------------------------------------------------------------------------------*/
+
 /*---------------------------------------------------------------------------------------*/ 
 void moveBrake(int i)
 {
-     analogWrite(DiskBrake, i);
+    analogWrite(DiskBrake, i);
 }
+
 /*---------------------------------------------------------------------------------------*/
 void moveSteer(int i)
 {
-     analogWrite(Steer, i);
+    analogWrite(Steer, i);
 }
+
 /*---------------------------------------------------------------------------------------*/
 void moveVehicle(int counts)
 {
@@ -359,17 +363,17 @@ void moveVehicle(int counts)
       1.50 V: brisker       94
       3.63 V: max          227 counts     
       255 counts = 4.08 V      
-      */
-   DAC_Write(0, counts);
+     */
+    DAC_Write(0, counts);
 }
+
 /*---------------------------------------------------------------------------------------*/
 /* DAC_Write applies value to address, producing an analog voltage.
-// address: 0 for chan A; 1 for chan B; 2 for chan C; 3 for chan D
-// value: digital value converted to analog voltage
-// Output goes to mcp 4802 Digital-Analog Converter Chip via SPI
-// There is no input back from the chip.
-*/
-void DAC_Write(int address, int value)
+   address: 0 for chan A; 1 for chan B; 2 for chan C; 3 for chan D
+   value: digital value converted to analog voltage
+   Output goes to mcp 4802 Digital-Analog Converter Chip via SPI
+   There is no input back from the chip.
+ */
 
 /*
 REGISTER 5-3: WRITE COMMAND REGISTER FOR MCP4802 (8-BIT DAC)
@@ -389,44 +393,40 @@ bit 12   SHDN: Output Shutdown Control bit
          VOUT pin is connected to 500 k (typical)
 bit 11-0 D11:D0: DAC Input Data bits. Bit x is ignored.
 
-
 With 4.95 V on Vcc, observed output for 255 is 4.08V.
 This is as documented; with gain of 2, maximum output is 2 * Vref
-
 */
-
+void DAC_Write(int address, int value)
 {
-  int byte1 = ((value & 0xF0)>>4) | 0x10; // acitve mode, bits D7-D4
-  int byte2 = (value & 0x0F)<<4;           // D3-D0
-  if (address < 2)
-  {
-      // take the SS pin low to select the chip:
-      digitalWrite(SelectAB,LOW);
-      if (address >= 0)
-      { 
-        if (address == 1)
-          byte1 |= 0x80;  // second channnel
-        SPI.transfer(byte1);
-        SPI.transfer(byte2);
-       }
-      // take the SS pin high to de-select the chip:
-      digitalWrite(SelectAB,HIGH);
-  }
-  else
-  {
-      // take the SS pin low to select the chip:
-      digitalWrite(SelectCD,LOW);
-      if (address <= 3)
-      {
-        if (address == 3)
-          byte1 |= 0x80;  // second channnel
-        SPI.transfer(byte1);
-        SPI.transfer(byte2);
-      }
-       // take the SS pin high to de-select the chip:
-      digitalWrite(SelectCD,HIGH);
-  }
+    int byte1 = ((value & 0xF0)>>4) | 0x10; // acitve mode, bits D7-D4
+    int byte2 = (value & 0x0F)<<4;           // D3-D0
+    if (address < 2)
+    {
+        // take the SS pin low to select the chip:
+        digitalWrite(SelectAB,LOW);
+        if (address >= 0)
+        { 
+            if (address == 1)
+                byte1 |= 0x80;  // second channnel
+            SPI.transfer(byte1);
+            SPI.transfer(byte2);
+        }
+        // take the SS pin high to de-select the chip:
+        digitalWrite(SelectAB,HIGH);
+    }
+    else
+    {
+        // take the SS pin low to select the chip:
+        digitalWrite(SelectCD,LOW);
+        if (address <= 3)
+        {
+            if (address == 3)
+                byte1 |= 0x80;  // second channnel
+            SPI.transfer(byte1);
+            SPI.transfer(byte2);
+        }
+        // take the SS pin high to de-select the chip:
+        digitalWrite(SelectCD,HIGH);
+    }
 }
-/*---------------------------------------------------------------------------------------*/ 
-
-
+/*---------------------------------------------------------------------------------------*/
